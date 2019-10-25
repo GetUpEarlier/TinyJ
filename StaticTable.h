@@ -12,11 +12,11 @@ namespace TinyJ{
 
 class StaticTable{
 private:
-    Slot* _slots;
+    U8* _content;
     U32 _capacity;
 public:
     explicit StaticTable(U32 capacity){
-        _slots = new Slot[capacity];
+        _content = new U8[capacity];
         _capacity = capacity;
     }
 
@@ -24,12 +24,35 @@ public:
         return _capacity;
     }
 
-    Slot& at(U32 index){
-        return _slots[index];
+    U8* content(){
+        return _content;
     }
-
-    Slot2& at2(U32 index){
-        return *((Slot2*)(&_slots[index]));
+    Boolean& booleanAt(U32 shift){
+        return *(Boolean*)(content() + shift);
+    }
+    Byte& byteAt(U32 shift){
+        return *(Byte*)(content() + shift);
+    }
+    Short& shortAt(U32 shift){
+        return *(Short*)(content() + shift);
+    }
+    Char& charAt(U32 shift){
+        return *(Char*)(content() + shift);
+    }
+    Int& intAt(U32 shift){
+        return *(Int*)(content() + shift);
+    }
+    Long& longAt(U32 shift){
+        return *(Long*)(content() + shift);
+    }
+    Float& floatAt(U32 shift){
+        return *(Float*)(content() + shift);
+    }
+    Double& doubleAt(U32 shift){
+        return *(Double*)(content() + shift);
+    }
+    Reference& referenceAt(U32 shift){
+        return *(Reference*)(content() + shift);
     }
 };
 

@@ -138,8 +138,7 @@ public:
             klass->fields.push_back(fieldInfo);
         }
         klass->objectSize = instanceShift;
-        Reference staticTable = _heap->alloc(staticShift);
-        klass->staticTable = _heap->deref<StaticTable>(staticTable);
+        klass->staticTable = new StaticTable(staticShift);
         U16 countMethods = in.readU16();
         for(U16 i = 0;i < countMethods;i++){
             klass->methods.push_back(readMethodInfo(klass, &in));

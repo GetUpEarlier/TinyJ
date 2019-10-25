@@ -22,10 +22,6 @@ public:
     }
     bool isInstance(Class* targetKlass);
 
-    /*template <typename T>
-    Bytes<sizeof(T)>& field(size_t shift){
-        return *(Bytes<sizeof(T)>*)(&((U8*)(this+1))[shift]);
-    }*/
     Boolean& booleanAt(U32 shift){
         return *(Boolean*)(content() + shift);
     }

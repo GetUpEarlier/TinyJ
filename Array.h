@@ -21,11 +21,6 @@ public:
         return klass->getElementClass();
     }
 
-    /*template <typename T>
-    Bytes<sizeof(T)>& element(size_t shift){
-        return ((Bytes<sizeof(T)>*)(this+1))[shift];
-    }*/
-
     template <typename T>
     T* element(){
         return (T*)(this+1);

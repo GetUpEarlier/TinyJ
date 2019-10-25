@@ -92,6 +92,19 @@ public:
         return nullptr;
     }
 
+    void initClass(Class* klass){
+        if(klass->status == ClassStatus::UN_INITED){
+            if(klass->superClass != nullptr){
+                initClass(klass->superClass);
+            }
+            klass->status = ClassStatus::INITED;
+            MethodInfo* clInit = klass->lookupMethod("<clinit>", "()V");
+            if(clInit != nullptr){
+                loop(clInit);
+            }
+        }
+    }
+
     void registerNativeMethod(string classDescriptor, string name, string descriptor, NativeMethod method){
         _nativeMethodTable[classDescriptor + " " + name + " " + descriptor] = new NativeMethod(std::move(method));
     }
@@ -256,10 +269,10 @@ public:
                     }else if(constant->tag == ConstantType::STRING){
                         opStack.pushReference(((ConstantString*)constant)->getReference(this));
                     }else if(constant->tag == ConstantType::CLASS){
-                        //TODO
-
+                        opStack.pushReference(refClass(((ConstantClass*)constant)->getClass()));
                     }else if(constant->tag == ConstantType::INTERFACE_METHOD_REF){
                         //TODO
+
                     }
                     break;
                 }
@@ -916,14 +929,41 @@ public:
                     U16 index = reader.readU16();
                     auto* constantField = context->constantField(index);
                     auto* fieldName = constantField->getNameAndType()->getName();
-                    Class* klass = constantField->klass->getClass();
+                    Class* klass = constantField->getClass()->getClass();
+                    initClass(klass);
                     FieldInfo* fieldInfo = constantField->getFieldInfo();
-                    if(fieldInfo->size == 32){
-                        opStack.push(klass->staticTable->at(fieldInfo->shift));
-                    }else if(fieldInfo->size == 64){
-                        opStack.push2(klass->staticTable->at2(fieldInfo->shift));
+                    U32 shift = fieldInfo->shift;
+                    if(fieldInfo->getClass()->isPrimitive){
+                        switch(fieldInfo->getClass()->primitive){
+                            case Primitive::NONE:
+                                throw std::exception();
+                            case Primitive::BOOLEAN:
+                                opStack.pushBoolean(klass->staticTable->booleanAt(shift));
+                                break;
+                            case Primitive::CHAR:
+                                opStack.pushChar(klass->staticTable->charAt(shift));
+                                break;
+                            case Primitive::FLOAT:
+                                opStack.pushChar(klass->staticTable->floatAt(shift));
+                                break;
+                            case Primitive::DOUBLE:
+                                opStack.pushDouble(klass->staticTable->doubleAt(shift));
+                                break;
+                            case Primitive::BYTE:
+                                opStack.pushByte(klass->staticTable->byteAt(shift));
+                                break;
+                            case Primitive::SHORT:
+                                opStack.pushShort(klass->staticTable->shortAt(shift));
+                                break;
+                            case Primitive::INT:
+                                opStack.pushInt(klass->staticTable->intAt(shift));
+                                break;
+                            case Primitive::LONG:
+                                opStack.pushLong(klass->staticTable->longAt(shift));
+                                break;
+                        }
                     }else{
-                        throw std::exception();
+                        opStack.pushReference(klass->staticTable->referenceAt(shift));
                     }
                     break;
                 }
@@ -931,14 +971,41 @@ public:
                     U16 index = reader.readU16();
                     auto* constantField = context->constantField(index);
                     auto* fieldName = constantField->getNameAndType()->getName();
-                    Class* klass = constantField->klass->getClass();
+                    Class* klass = constantField->getClass()->getClass();
+                    initClass(klass);
                     FieldInfo* fieldInfo = constantField->getFieldInfo();
-                    if(fieldInfo->size == 32){
-                        klass->staticTable->at(fieldInfo->shift) = opStack.pop();
-                    }else if(fieldInfo->size == 64){
-                        klass->staticTable->at2(fieldInfo->shift) = opStack.pop2();
+                    U32 shift = fieldInfo->shift;
+                    if(fieldInfo->getClass()->isPrimitive){
+                        switch(fieldInfo->getClass()->primitive){
+                            case Primitive::NONE:
+                                throw std::exception();
+                            case Primitive::BOOLEAN:
+                                klass->staticTable->booleanAt(shift)=(opStack.pop().boolValue);
+                                break;
+                            case Primitive::CHAR:
+                                klass->staticTable->charAt(shift)=(opStack.pop().charValue);
+                                break;
+                            case Primitive::FLOAT:
+                                klass->staticTable->floatAt(shift)=(opStack.pop().floatValue);
+                                break;
+                            case Primitive::DOUBLE:
+                                klass->staticTable->doubleAt(shift)=(opStack.pop2().doubleValue);
+                                break;
+                            case Primitive::BYTE:
+                                klass->staticTable->byteAt(shift)=(opStack.pop().byteValue);
+                                break;
+                            case Primitive::SHORT:
+                                klass->staticTable->shortAt(shift)=(opStack.pop().shortValue);
+                                break;
+                            case Primitive::INT:
+                                klass->staticTable->intAt(shift)=(opStack.pop().intValue);
+                                break;
+                            case Primitive::LONG:
+                                klass->staticTable->longAt(shift)=(opStack.pop2().longValue);
+                                break;
+                        }
                     }else{
-                        throw std::exception();
+                        klass->staticTable->referenceAt(shift)=(opStack.pop().referenceValue);
                     }
                     break;
                 }
@@ -1163,6 +1230,7 @@ public:
                     U16 index = reader.readU16();
                     ConstantMethodRef* methodRef = context->constantMethod(index);
                     MethodInfo* methodInfo = methodRef->getMethodInfo();
+                    initClass(methodRef->getClass()->getClass());
                     if(!methodInfo->isStatic()){
                         throw std::exception();
                     }
@@ -1353,6 +1421,7 @@ public:
     }
 
     Reference newObject(Class* klass){
+        initClass(klass);
         U32 size = sizeof(ObjectHeader) + klass->objectSize;
         Reference reference = _heap->alloc(size);
         derefObject(reference)->klass = klass;
@@ -1364,11 +1433,13 @@ public:
         if(length < 0){
             return 0;
         }
-        U32 size = sizeof(ArrayHeader) + length*getSizeFromDescriptor(descriptor);
+        string arrayClassName = "[" + descriptor;
+        Class* arrayClass = _classLoader->lookupClassByDescriptor(arrayClassName);
+        initClass(arrayClass);
+        U32 size = sizeof(ArrayHeader) + length*getSizeFromDescriptor(std::move(descriptor));
         Reference reference = _heap->alloc(size);
-        string arrayClassName = "[" + std::move(descriptor);
         auto* header = (ArrayHeader*)_heap->deref(reference);
-        header->klass = _classLoader->lookupClassByDescriptor(arrayClassName);
+        header->klass = arrayClass;
         header->length = length;
         return reference;
     }

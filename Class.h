@@ -11,7 +11,6 @@
 #include "Primitive.h"
 #include "String.h"
 #include "Slot.h"
-#include "Util.h"
 #include "StaticTable.h"
 #include "Value.h"
 #include "Object.h"
@@ -456,8 +455,8 @@ struct Class{
     }
 
     FieldInfo* lookupField(ConstantFieldRef* constantField){
-        return lookupField(constantField->getNameAndType()->name->bytes,
-                constantField->getNameAndType()->descriptor->bytes);
+        return lookupField(constantField->getNameAndType()->getName()->bytes,
+                constantField->getNameAndType()->getDescriptor()->bytes);
     }
 
     MethodInfo* lookupMethod(string name, string descriptor){

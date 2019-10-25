@@ -37,7 +37,8 @@ public:
     }
     template <typename T>
     Reference alloc(){
-        return alloc(sizeof(T));
+        Reference reference = alloc(sizeof(T));
+        return reference;
     }
     void* deref(Reference reference){
         if(reference == 0){
