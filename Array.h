@@ -21,13 +21,43 @@ public:
         return klass->getElementClass();
     }
 
-    Slot& slotAt(U32 index){
-        return ((Slot*)(this+1))[index];
+    /*template <typename T>
+    Bytes<sizeof(T)>& element(size_t shift){
+        return ((Bytes<sizeof(T)>*)(this+1))[shift];
+    }*/
+
+    template <typename T>
+    T* element(){
+        return (T*)(this+1);
+    }
+    Boolean& booleanElement(U32 index){
+        return element<Boolean>()[index];
+    }
+    Byte& byteElement(U32 index){
+        return element<Byte>()[index];
+    }
+    Char& charElement(U32 index){
+        return element<Char>()[index];
+    }
+    Short& shortElement(U32 index){
+        return element<Short>()[index];
+    }
+    Int& intElement(U32 index){
+        return element<Int>()[index];
+    }
+    Long& longElement(U32 index){
+        return element<Long>()[index];
+    }
+    Double& doubleElement(U32 index){
+        return element<Double>()[index];
+    }
+    Float& floatElement(U32 index){
+        return element<Float>()[index];
+    }
+    Reference& referenceElement(U32 index){
+        return element<Reference>()[index];
     }
 
-    Slot2& slot2At(U32 index){
-        return *((Slot2*)&((Slot*)(this+1))[index]);
-    }
 };
 
 }

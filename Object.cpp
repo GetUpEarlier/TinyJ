@@ -25,8 +25,8 @@ bool ObjectHeader::isInstance(Class* targetKlass) {
             }else if(pClass->superClassNameIndex == pClass->thisClassNameIndex){
                 return false;
             }else{
-                ConstantUtf8* className = pClass->constantString(pClass->constantClass(pClass->superClassNameIndex)->nameIndex);
-                pClass = pClass->classLoader->lookupClassByDescriptor(className->bytes);
+                Class* superClass = pClass->superClass;
+                pClass = superClass;
             }
         }
     }

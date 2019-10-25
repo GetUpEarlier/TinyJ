@@ -14,36 +14,36 @@ class CodeReader{
 private:
     U8* _array;
     U32 _length;
-    U8* _ptr;
+    U32* _pc;
 public:
-    explicit CodeReader(U8* array, U32 length){
+    explicit CodeReader(U8* array, U32 length, U32* pc){
         _array = array;
         _length = length;
-        _ptr = _array;
+        _pc = pc;
     }
 
     U32 pc(){
-        return _ptr - _array;
+        return *_pc;
     }
 
     void setPc(U32 pc){
-        _ptr = _array + pc;
+        *_pc = pc;
     }
 
     void incPc(U32 inc){
-        _ptr += inc;
+        *_pc += inc;
     }
 
     U8 readU8(){
-        return *_ptr++;
+        return _array[(*_pc)++];
     }
 
     OpCode readOpCode(){
-        return (OpCode)*_ptr++;
+        return (OpCode)readU8();
     }
 
     Byte readByte(){
-        return (Byte)*_ptr++;
+        return (Byte)readU8();
     }
 
     Short readShort(){

@@ -28,7 +28,7 @@ public:
     }
 
     Slot2& at2(U32 index){
-        return *((Slot2*)(&_slots[index]);
+        return *((Slot2*)(&_slots[index]));
     }
 };
 

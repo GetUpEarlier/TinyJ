@@ -4,19 +4,20 @@
 #include "Class.h"
 
 #include "ClassLoader.h"
+#include "Vm.h"
 
 namespace TinyJ{
 
 Class* ConstantClass::getClass() {
     if(klass == nullptr){
-        klass = ClassMember::klass->classLoader->lookupClassByDescriptor(getName()->bytes);
+        klass = ClassMember::klass->classLoader->lookupClassByName(getName()->bytes);
     }
     return klass;
 }
 
 ConstantUtf8* ConstantClass::getName() {
     if(name == nullptr){
-        name = klass->constantString(nameIndex);
+        name = ClassMember::klass->constantString(nameIndex);
     }
     return name;
 }
@@ -26,6 +27,13 @@ ConstantUtf8* ConstantString::getUtf8() {
         utf8 = klass->constantString(utf8Index);
     }
     return utf8;
+}
+
+Reference ConstantString::getReference(Interpreter* interpreter) {
+    if(reference == 0){
+        reference = interpreter->internString(getUtf8()->bytes);
+    }
+    return reference;
 }
 
 ConstantUtf8* ConstantNameAndTypeRef::getName() {
@@ -93,7 +101,10 @@ ConstantNameAndTypeRef* ConstantInterfaceMethodRef::getNameAndType() {
 }
 
 Class* FieldInfo::getClass() {
-    return klass->classLoader->lookupClassByDescriptor(descriptor);
+    if(klass == nullptr){
+        klass = ClassMember::klass->classLoader->lookupClassByDescriptor(descriptor);
+    }
+    return klass;
 }
 
 Class* Class::getElementClass() {
@@ -105,6 +116,18 @@ Class* Class::getElementClass() {
         }
     }
     return elementClass;
+}
+
+AttributeInfo* MethodInfo::findAttribute(Class* context, const char* name) {
+    for(AttributeInfo* attribute: attributes){
+        if(context->constant(attribute->nameIndex)->tag == ConstantType::UTF8){
+            auto* utf8Info = (ConstantUtf8*)context->constant(attribute->nameIndex);
+            if(utf8Info->stringEquals(name)){
+                return attribute;
+            }
+        }
+    }
+    return nullptr;
 }
 
 }

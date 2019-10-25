@@ -28,6 +28,12 @@ public:
     Slot pop(){
         return *(_top--);
     }
+    Slot peek(U32 depth){
+        return *(_top - depth);
+    }
+    Slot2 peek2(U32 depth){
+        return *((Slot2*)(_top-2));
+    }
     void push(Slot slot){
         *(++_top) = slot;
     }
@@ -44,6 +50,9 @@ public:
         Slot2 value = top2();
         _top -= 2;
         return value;
+    }
+    void pushBoolean(Boolean value){
+        push(Slot::fromBoolean(value));
     }
     void pushByte(Byte value){
         push(Slot::fromByte(value));
@@ -67,10 +76,6 @@ public:
         *(Slot2*)(_top-1) = value;
         _top += 2;
     }
-    /*void push2(Slot low, Slot high){
-        *(Slot2*)(_top-1) = Slot2::fromSlots(low, high);
-        _top += 2;
-    }*/
     void pushLong(Long value){
         push2(Slot2::fromLong(value));
     }

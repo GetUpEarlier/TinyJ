@@ -62,10 +62,6 @@ struct SlotX2{
 };
 
 union Slot2{
-    /*struct {
-        Slot low;
-        Slot high;
-    };*/
     Long longValue;
     Double doubleValue;
 
@@ -80,13 +76,6 @@ union Slot2{
         slot.doubleValue = value;
         return slot;
     }
-
-    /*static Slot2 fromSlots(Slot low, Slot high){
-        Slot2 slot{};
-        slot.low = low;
-        slot.high = high;
-        return slot;
-    }*/
 };
 
 }

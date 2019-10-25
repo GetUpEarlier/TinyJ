@@ -17,13 +17,17 @@ public:
     explicit StackFrame(AttributeCode* code)
         : operandStack(code->maxStack)
         , localTable(code->maxLocals)
-        , code(code->code, code->codeLength)
-        , context(code->klass){}
+        , code(code)
+        , context(code->klass)
+        , codeReader(code->code, code->codeLength, &pc)
+        , pc(0){}
 
     OperandStack operandStack;
     LocalTable localTable;
-    CodeReader code;
+    AttributeCode* code;
+    CodeReader codeReader;
     Class* context;
+    U32 pc;
 };
 
 }

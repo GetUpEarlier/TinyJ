@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <string>
+#include <functional>
 #include "Primitive.h"
 #include "String.h"
 #include "Slot.h"
@@ -24,18 +25,10 @@ using std::string;
 union Value;
 class Class;
 class ClassLoader;
+class Interpreter;
+class StackFrame;
 
-/*enum class ValueType{
-    OBJECT,
-    BOOLEAN,
-    BYTE,
-    SHORT,
-    CHAR,
-    INT,
-    FLOAT,
-    LONG,
-    DOUBLE,
-};*/
+using NativeMethod = std::function<void(vector<Slot>*)>;
 
 enum class ConstantType: U8{
     UTF8 = 1,
@@ -51,7 +44,11 @@ enum class ConstantType: U8{
     NAME_AND_TYPE = 12,
     METHOD_HANDLE = 15,
     METHOD_TYPE = 16,
-    INVOKE_DYNAMIC = 18
+    DYNAMIC = 17,
+    INVOKE_DYNAMIC = 18,
+    MODULE = 19,
+    PACKAGE = 20,
+
 };
 
 struct ClassMember{
@@ -216,6 +213,7 @@ struct FieldInfo:ClassMember{
     //Runtime Value
     string name;
     string descriptor;
+    Class* klass;
     U32 shift;
     U32 size;
 
@@ -255,9 +253,14 @@ struct MethodInfo:ClassMember{
     string descriptor;
     MethodDescriptor* methodDescriptor;
     AttributeCode* code;
+    NativeMethod* nativeMethod;
 
     bool isStatic(){
         return ((U16)accessFlag&(U16)MethodAccessFlag::STATIC);
+    }
+
+    bool isNative(){
+        return ((U16)accessFlag&(U16)MethodAccessFlag::NATIVE);
     }
 
     AttributeInfo* findAttribute(Class* context, const char* name);
@@ -313,8 +316,10 @@ struct ConstantString: ConstantInfo{
 
     //Runtime Value
     ConstantUtf8* utf8;
+    Reference reference;
 
     ConstantUtf8* getUtf8();
+    Reference getReference(Interpreter* interpreter);
 };
 
 struct ConstantNameAndTypeRef: ConstantInfo{
@@ -383,6 +388,10 @@ struct ConstantInvokeDynamic: ConstantInfo{
     U16 nameAndTypeIndex;
 };
 
+enum class ClassStatus{
+    INITED, UN_INITED
+};
+
 struct Class{
     U32 magic;
     U16 minorVersion;
@@ -409,11 +418,12 @@ struct Class{
     bool isArray;
     bool isPrimitive;
     Primitive primitive;
+    ClassStatus status;
 
     Class* getElementClass();
 
     ConstantInfo* constant(size_t index){
-        return constantPool[1 + index];
+        return constantPool[index - 1];
     }
 
     ConstantUtf8* constantString(size_t index){
@@ -436,18 +446,18 @@ struct Class{
         return (ConstantNameAndTypeRef*)constant(index);
     }
 
-    U32 countStaticSlots(){
-        //TODO
-    }
-
-    FieldInfo* lookupField(ConstantFieldRef* constantField){
+    FieldInfo* lookupField(string name, string descriptor){
         for(FieldInfo* field: fields){
-            if(field->name == constantField->getNameAndType()->name->bytes
-                && field->descriptor == constantField->getNameAndType()->descriptor->bytes){
+            if(field->name == name && field->descriptor == descriptor){
                 return field;
             }
         }
         return nullptr;
+    }
+
+    FieldInfo* lookupField(ConstantFieldRef* constantField){
+        return lookupField(constantField->getNameAndType()->name->bytes,
+                constantField->getNameAndType()->descriptor->bytes);
     }
 
     MethodInfo* lookupMethod(string name, string descriptor){
@@ -460,14 +470,18 @@ struct Class{
         return nullptr;
     }
 
+    MethodInfo* lookupMethod(MethodInfo* prototype){
+        return lookupMethod(prototype->name, prototype->descriptor);
+    }
+
     MethodInfo* lookupMethod(ConstantMethodRef* constantMethod){
         return lookupMethod(
-                constantMethod->getNameAndType()->name->bytes,
-                constantMethod->getNameAndType()->descriptor->bytes);
+                constantMethod->getNameAndType()->getName()->bytes,
+                constantMethod->getNameAndType()->getDescriptor()->bytes);
     }
 };
 
-AttributeInfo* MethodInfo::findAttribute(Class* context, const char* name) {
+/*AttributeInfo* FieldInfo::findAttribute(Class* context, const char* name) {
     for(AttributeInfo* attribute: attributes){
         if(context->constant(attribute->nameIndex)->tag == ConstantType::UTF8){
             auto* utf8Info = (ConstantUtf8*)context->constant(attribute->nameIndex);
@@ -477,19 +491,7 @@ AttributeInfo* MethodInfo::findAttribute(Class* context, const char* name) {
         }
     }
     return nullptr;
-}
-
-AttributeInfo* FieldInfo::findAttribute(Class* context, const char* name) {
-    for(AttributeInfo* attribute: attributes){
-        if(context->constant(attribute->nameIndex)->tag == ConstantType::UTF8){
-            auto* utf8Info = (ConstantUtf8*)context->constant(attribute->nameIndex);
-            if(utf8Info->stringEquals(name)){
-                return attribute;
-            }
-        }
-    }
-    return nullptr;
-}
+}*/
 
 }
 

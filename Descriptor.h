@@ -20,6 +20,7 @@ struct MethodDescriptor{
     string retDescriptor;
     vector<string> argDescriptors;
     U32 argSlotCount{};
+    U32 retSlotCount{};
 
     bool operator==(const MethodDescriptor& another){
         return retDescriptor == another.retDescriptor && argDescriptors == another.argDescriptors;
@@ -28,26 +29,7 @@ struct MethodDescriptor{
 
 string readDescriptor(string input, size_t& cursor);
 
-MethodDescriptor* parseMethodDescriptor(string input){
-    auto* methodDescriptor = new MethodDescriptor();
-    size_t cursor = 1;
-    U32 sizeSum = 0;
-    while(true){
-        if(input[cursor] == ')'){
-            break;
-        }else{
-            string descriptor = readDescriptor(input, cursor);
-            U32 argSize = getSizeFromDescriptor(descriptor);
-            sizeSum += argSize;
-            methodDescriptor->argDescriptors.push_back(descriptor);
-        }
-    }
-    cursor++;
-    methodDescriptor->retDescriptor = readDescriptor(input, cursor);
-    sizeSum += getSizeFromDescriptor(methodDescriptor->retDescriptor);
-    methodDescriptor->argSlotCount = sizeSum / 32;
-    return methodDescriptor;
-}
+MethodDescriptor* parseMethodDescriptor(string input);
 
 }
 

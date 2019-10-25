@@ -27,24 +27,31 @@ public:
         }
     }
     U8 readU8(){
-        _stream->read((char*)_buffer, 1);
+        readN(_buffer, 1);
         return _buffer[0];
     }
     U16 readU16(){
-        _stream->read((char*)_buffer, 2);
+        readN(_buffer, 2);
         return _endian->toU16(_buffer);
     }
     U32 readU32(){
-        _stream->read((char*)_buffer, 4);
+        readN(_buffer, 4);
         return _endian->toU32(_buffer);
     }
     U64 readU64(){
-        _stream->read((char*)_buffer, 8);
+        readN(_buffer, 8);
         return _endian->toU64(_buffer);
+    }
+    void readN(U8* buffer, size_t n){
+        size_t ptr = 0;
+        while(ptr != n){
+            _stream->read((char*)buffer, n - ptr);
+            ptr += _stream->gcount();
+        }
     }
     U8* readN(size_t n){
         U8* buffer = new U8[n];
-        _stream->read((char*)buffer, n);
+        readN(buffer, n);
         return buffer;
     }
 };

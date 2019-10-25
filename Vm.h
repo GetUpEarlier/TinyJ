@@ -11,10 +11,15 @@
 #include <cmath>
 #include <map>
 #include <unordered_map>
+#include <string>
+#include <codecvt>
+#include <locale>
+#include <functional>
+#include <tuple>
 #include "Value.h"
 #include "Class.h"
 #include "Instruction.h"
-//#include "Bytereader.h"
+#include "Primitive.h"
 #include "Heap.h"
 #include "Endian.h"
 #include "Object.h"
@@ -22,18 +27,20 @@
 #include "CodeReader.h"
 #include "OperandStack.h"
 #include "StackFrame.h"
+#include "ClassLoader.h"
 
 namespace TinyJ{
 
 using std::vector;
 using std::stack;
-
-//using Frame = std::vector<Value>;
-
-/*class OperandStack{
-public:
-
-};*/
+using std::codecvt;
+using std::string;
+using std::wstring;
+using std::pair;
+using std::make_pair;
+using std::tuple;
+using std::make_tuple;
+using std::unordered_map;
 
 struct Thread{
     vector<StackFrame*> frameStack;
@@ -51,45 +58,88 @@ struct Thread{
         frameStack.pop_back();
         return top;
     }
+
+    bool empty(){
+        return frameStack.empty();
+    }
 };
 
 class Interpreter{
 private:
     ClassLoader* _classLoader;
     Heap* _heap;
+    unordered_map<string, Reference> _stringPool;
+    unordered_map<string, NativeMethod*> _nativeMethodTable;
 public:
-    explicit Interpreter(string classPath){
+    explicit Interpreter(string classPath): _nativeMethodTable(), _stringPool(){
         _heap = new Heap(1024*1024*256);
         _classLoader = new ClassLoader(std::move(classPath), _heap);
+        registerNativeMethods();
+    }
+
+    void invokeMain(string bootstrapClass){
+        Class* klass = _classLoader->lookupClassByDescriptor("L" + bootstrapClass + ";");
+        MethodInfo* main = findMainMethod(klass);
+        loop(main);
+    }
+
+    MethodInfo* findMainMethod(Class* klass){
+        for(MethodInfo* methodInfo: klass->methods){
+            if(methodInfo->name == "main" && methodInfo->descriptor == "([Ljava/lang/String;)V"){
+                return methodInfo;
+            }
+        }
+        return nullptr;
+    }
+
+    void registerNativeMethod(string classDescriptor, string name, string descriptor, NativeMethod method){
+        _nativeMethodTable[classDescriptor + " " + name + " " + descriptor] = new NativeMethod(std::move(method));
+    }
+
+    NativeMethod* lookupNativeMethod(string classDescriptor, string name, string descriptor){
+        return _nativeMethodTable[classDescriptor + " " + name + " " + descriptor];
+    }
+
+    NativeMethod* lookupNativeMethod(MethodInfo* methodInfo){
+        return lookupNativeMethod(methodInfo->klass->descriptor, methodInfo->name, methodInfo->descriptor);
+    }
+
+    void registerNativeMethods(){
+        //TODO
+        registerNativeMethod("Ljava/lang/Object", "hashCode", "()I", [](vector<Slot>* args)->void{
+            args->at(0) = (Slot::fromInt(args->at(0).intValue));
+        });
+        registerNativeMethod("Ljava/lang/Object", "equals", "(Ljava/lang/Object;)B", [](vector<Slot>* args){
+            return args->at(0).referenceValue == args->at(1).referenceValue;
+        });
+        registerNativeMethod("Ljava/lang/Object", "toString", "()Ljava/lang/String;", [this](vector<Slot>* args)->void{
+            ObjectHeader* object = derefObject(args->at(0).referenceValue);
+            string toString = object->klass->descriptor + "@" + std::to_string(object->hashCode);
+            args->at(0) = (Slot::fromReference(newString(toString)));
+        });
+        registerNativeMethod("Ljava/lang/Object", "getClass", "()Ljava/lang/Class;", [this](vector<Slot>* args)->void{
+            ObjectHeader* object = derefObject(args->at(0).referenceValue);
+            args->at(0) = (Slot::fromReference(refClass(object->klass)));
+        });
+        registerNativeMethod("LMain2", "print", "(Ljava/lang/String;)V", [this](vector<Slot>* args)->void{
+            ObjectHeader* object = derefObject(args->at(0).referenceValue);
+            ArrayHeader* charArray = derefArray(object->referenceAt(0));
+            for(U32 i = 0;i < charArray->length;i++){
+                std::wcout << (wchar_t)charArray->charElement(i);
+            }
+            std::wcout << std::endl;
+        });
     }
 
     void loop(MethodInfo* method){
         auto* thread = new Thread();
         thread->push(new StackFrame(method->code));
-        while(true){
+        while(!thread->empty()){
             StackFrame* frame = thread->top();
-            CodeReader& reader = frame->code;
+            CodeReader& reader = frame->codeReader;
             OperandStack& opStack = frame->operandStack;
             LocalTable& locals = frame->localTable;
             Class* context = frame->context;
-/*        }
-    }
-
-    void execute(Class* context, Thread* thread, MethodInfo* methodInfo){
-        auto* codeAttribute = (AttributeCode*)methodInfo->findAttribute(context, "Code");
-        U32 codeLength = codeAttribute->codeLength;
-        U8* codeArray = codeAttribute->code;
-        StackFrame* oldFrame = thread->top();
-        CodeReader reader(codeArray, codeLength);
-        thread->push(new StackFrame(codeAttribute->maxLocals, codeAttribute->maxStack));
-        StackFrame* newFrame = thread->top();
-        OperandStack& opStack = newFrame->operandStack;
-        LocalTable& locals = newFrame->localTable;
-        U32 argSlotCount = methodInfo->methodDescriptor->argSlotCount;
-        for(U32 i = argSlotCount-1;i >= 0;i--){
-            locals.at(i) = oldFrame->operandStack.pop();
-        }
-        while(true){*/
             auto code = reader.readOpCode();
             switch(code){
                 case OpCode::I_LOAD:
@@ -204,9 +254,10 @@ public:
                     }else if(constant->tag == ConstantType::F32){
                         opStack.pushFloat(((ConstantInteger*)constant)->value);
                     }else if(constant->tag == ConstantType::STRING){
-                        //TODO
+                        opStack.pushReference(((ConstantString*)constant)->getReference(this));
                     }else if(constant->tag == ConstantType::CLASS){
                         //TODO
+
                     }else if(constant->tag == ConstantType::INTERFACE_METHOD_REF){
                         //TODO
                     }
@@ -648,7 +699,7 @@ public:
                 case OpCode::A_NEW_ARRAY:{
                     U16 classIndex = reader.readU16();
                     auto* className = context->constantString(context->constantClass(classIndex)->nameIndex);
-                    auto* klass = _classLoader->lookupClassByDescriptor(className->bytes);
+                    auto* klass = _classLoader->lookupClassByName(className->bytes);
                     Int length = opStack.pop().intValue;
                     Reference array = newArray("L"+context->constantClass(classIndex)->getName()->bytes, length);
                     opStack.pushReference(array);
@@ -671,56 +722,154 @@ public:
                     opStack.pushInt(_heap->deref<ArrayHeader>(array)->length);
                     break;
                 }
-                case OpCode::B_A_LOAD:
-                case OpCode::C_A_LOAD:
-                case OpCode::S_A_LOAD:
-                case OpCode::I_A_LOAD:
-                case OpCode::F_A_LOAD:
+                case OpCode::B_A_LOAD:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    auto* array = _heap->deref<ArrayHeader>(arrayReference);
+                    Int index = opStack.pop().intValue;
+                    opStack.pushByte(array->byteElement(index));
+                    break;
+                }
+                case OpCode::C_A_LOAD:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    auto* array = _heap->deref<ArrayHeader>(arrayReference);
+                    Int index = opStack.pop().intValue;
+                    opStack.pushChar(array->charElement(index));
+                    break;
+                }
+                case OpCode::S_A_LOAD:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    auto* array = _heap->deref<ArrayHeader>(arrayReference);
+                    Int index = opStack.pop().intValue;
+                    opStack.pushShort(array->shortElement(index));
+                    break;
+                }
+                case OpCode::I_A_LOAD:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    auto* array = _heap->deref<ArrayHeader>(arrayReference);
+                    Int index = opStack.pop().intValue;
+                    opStack.pushInt(array->intElement(index));
+                    break;
+                }
+                case OpCode::F_A_LOAD:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    auto* array = _heap->deref<ArrayHeader>(arrayReference);
+                    Int index = opStack.pop().intValue;
+                    opStack.pushFloat(array->floatElement(index));
+                    break;
+                }
                 case OpCode::A_A_LOAD:{
                     Reference arrayReference = opStack.pop().referenceValue;
                     auto* array = _heap->deref<ArrayHeader>(arrayReference);
                     Int index = opStack.pop().intValue;
-                    opStack.push(array->slotAt(index));
+                    opStack.pushReference(array->referenceElement(index));
                     break;
                 }
-                case OpCode::L_A_LOAD:
+                case OpCode::L_A_LOAD:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    auto* array = _heap->deref<ArrayHeader>(arrayReference);
+                    Int index = opStack.pop().intValue;
+                    opStack.pushLong(array->longElement(index));
+                    break;
+                }
                 case OpCode::D_A_LOAD:{
                     Reference arrayReference = opStack.pop().referenceValue;
                     auto* array = _heap->deref<ArrayHeader>(arrayReference);
                     Int index = opStack.pop().intValue;
-                    opStack.push2(array->slot2At(index));
+                    opStack.pushDouble(array->doubleElement(index));
                     break;
                 }
-                case OpCode::B_A_STORE:
-                case OpCode::C_A_STORE:
-                case OpCode::S_A_STORE:
-                case OpCode::I_A_STORE:
-                case OpCode::F_A_STORE:
+                case OpCode::B_A_STORE:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    Int index = opStack.pop().intValue;
+                    Slot value = opStack.pop();
+                    derefArray(arrayReference)->byteElement(index) = (value.byteValue);
+                    break;
+                }
+                case OpCode::C_A_STORE:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    Int index = opStack.pop().intValue;
+                    Slot value = opStack.pop();
+                    derefArray(arrayReference)->charElement(index) = (value.charValue);
+                    break;
+                }
+                case OpCode::S_A_STORE:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    Int index = opStack.pop().intValue;
+                    Slot value = opStack.pop();
+                    derefArray(arrayReference)->shortElement(index) = (value.shortValue);
+                    break;
+                }
+                case OpCode::I_A_STORE:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    Int index = opStack.pop().intValue;
+                    Slot value = opStack.pop();
+                    derefArray(arrayReference)->intElement(index) = (value.intValue);
+                    break;
+                }
+                case OpCode::F_A_STORE:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    Int index = opStack.pop().intValue;
+                    Slot value = opStack.pop();
+                    derefArray(arrayReference)->floatElement(index) = (value.floatValue);
+                    break;
+                }
                 case OpCode::A_A_STORE:{
                     Reference arrayReference = opStack.pop().referenceValue;
                     Int index = opStack.pop().intValue;
                     Slot value = opStack.pop();
-                    _heap->deref<ArrayHeader>(arrayReference)->slotAt(index) = value;
+                    derefArray(arrayReference)->referenceElement(index) = (value.referenceValue);
                     break;
                 }
-                case OpCode::L_A_STORE:
+                case OpCode::L_A_STORE:{
+                    Reference arrayReference = opStack.pop().referenceValue;
+                    Int index = opStack.pop().intValue;
+                    Slot2 value = opStack.pop2();
+                    derefArray(arrayReference)->longElement(index) = (value.longValue);
+                    break;
+                }
                 case OpCode::D_A_STORE:{
                     Reference arrayReference = opStack.pop().referenceValue;
                     Int index = opStack.pop().intValue;
                     Slot2 value = opStack.pop2();
-                    _heap->deref<ArrayHeader>(arrayReference)->slot2At(index) = value;
+                    derefArray(arrayReference)->doubleElement(index) = (value.doubleValue);
                     break;
                 }
                 case OpCode::GET_FIELD:{
                     U16 index = reader.readU16();
                     auto* object = _heap->deref<ObjectHeader>(opStack.pop().referenceValue);
                     FieldInfo* fieldInfo = context->constantField(index)->getFieldInfo();
-                    if(fieldInfo->size == 32){
-                        opStack.push(object->slotAt(fieldInfo->shift));
-                    }else if(fieldInfo->size == 64){
-                        opStack.push2(object->slot2At(fieldInfo->shift));
+                    U32 shift = fieldInfo->shift;
+                    if(fieldInfo->getClass()->isPrimitive){
+                        switch(fieldInfo->getClass()->primitive){
+                            case Primitive::NONE:
+                                throw std::exception();
+                            case Primitive::BOOLEAN:
+                                opStack.pushBoolean(object->booleanAt(shift));
+                                break;
+                            case Primitive::CHAR:
+                                opStack.pushChar(object->charAt(shift));
+                                break;
+                            case Primitive::FLOAT:
+                                opStack.pushChar(object->floatAt(shift));
+                                break;
+                            case Primitive::DOUBLE:
+                                opStack.pushDouble(object->doubleAt(shift));
+                                break;
+                            case Primitive::BYTE:
+                                opStack.pushByte(object->byteAt(shift));
+                                break;
+                            case Primitive::SHORT:
+                                opStack.pushShort(object->shortAt(shift));
+                                break;
+                            case Primitive::INT:
+                                opStack.pushInt(object->intAt(shift));
+                                break;
+                            case Primitive::LONG:
+                                opStack.pushLong(object->longAt(shift));
+                                break;
+                        }
                     }else{
-                        throw std::exception();
+                        opStack.pushReference(object->referenceAt(shift));
                     }
                     break;
                 }
@@ -728,12 +877,38 @@ public:
                     U16 index = reader.readU16();
                     auto* object = _heap->deref<ObjectHeader>(opStack.pop().referenceValue);
                     FieldInfo* fieldInfo = context->constantField(index)->getFieldInfo();
-                    if(fieldInfo->size == 32){
-                        object->slotAt(fieldInfo->shift) = opStack.pop();
-                    }else if(fieldInfo->size == 64){
-                        object->slot2At(fieldInfo->shift) = opStack.pop2();
+                    U32 shift = fieldInfo->shift;
+                    if(fieldInfo->getClass()->isPrimitive){
+                        switch(fieldInfo->getClass()->primitive){
+                            case Primitive::NONE:
+                                throw std::exception();
+                            case Primitive::BOOLEAN:
+                                object->booleanAt(shift)=(opStack.pop().boolValue);
+                                break;
+                            case Primitive::CHAR:
+                                object->charAt(shift)=(opStack.pop().charValue);
+                                break;
+                            case Primitive::FLOAT:
+                                object->floatAt(shift)=(opStack.pop().floatValue);
+                                break;
+                            case Primitive::DOUBLE:
+                                object->doubleAt(shift)=(opStack.pop2().doubleValue);
+                                break;
+                            case Primitive::BYTE:
+                                object->byteAt(shift)=(opStack.pop().byteValue);
+                                break;
+                            case Primitive::SHORT:
+                                object->shortAt(shift)=(opStack.pop().shortValue);
+                                break;
+                            case Primitive::INT:
+                                object->intAt(shift)=(opStack.pop().intValue);
+                                break;
+                            case Primitive::LONG:
+                                object->longAt(shift)=(opStack.pop2().longValue);
+                                break;
+                        }
                     }else{
-                        throw std::exception();
+                        object->referenceAt(shift)=(opStack.pop().referenceValue);
                     }
                     break;
                 }
@@ -981,99 +1156,207 @@ public:
                 }
                 case OpCode::JSR:
                 case OpCode::JSR_W:
-                case OpCode::RET:
-                case OpCode::RET_W:{
+                case OpCode::RET:{
                     throw std::exception();
                 }
                 case OpCode::INVOKE_STATIC:{
                     U16 index = reader.readU16();
                     ConstantMethodRef* methodRef = context->constantMethod(index);
-                    MethodInfo* methodToInvoke = methodRef->getMethodInfo();
-                    if(!methodToInvoke->isStatic()){
+                    MethodInfo* methodInfo = methodRef->getMethodInfo();
+                    if(!methodInfo->isStatic()){
                         throw std::exception();
                     }
-                    U32 argSlotCount = methodToInvoke->methodDescriptor->argSlotCount;
-                    auto* newFrame = new StackFrame(methodToInvoke->code);
-                    for(U32 i = argSlotCount-1;i >= 0;i--){
-                        newFrame->localTable.at(i) = opStack.pop();
+                    if(methodInfo->isNative()){
+                        if(methodInfo->name == "registerNatives"){
+                            break;
+                        }
+                        auto key = make_tuple();
+                        NativeMethod* nativeMethod = lookupNativeMethod(methodInfo);
+                        if(nativeMethod == nullptr){
+                            throw std::exception();
+                        }
+                        U32 argSlotCount = methodInfo->methodDescriptor->argSlotCount;
+                        U32 retSlotCount = methodInfo->methodDescriptor->retSlotCount;
+                        vector<Slot> args(std::max(argSlotCount, retSlotCount));
+                        for(I32 i = argSlotCount-1;i >= 0;i--){
+                            args[i] = opStack.pop();
+                        }
+                        (*nativeMethod)(&args);
+                        for(U32 i = 0;i < retSlotCount;i++){
+                            opStack.push(args[i]);
+                        }
+                    }else{
+                        U32 argSlotCount = methodInfo->methodDescriptor->argSlotCount;
+                        invokeMethod(thread, methodInfo->code, argSlotCount);
                     }
-                    thread->push(newFrame);
                     break;
                 }
                 case OpCode::INVOKE_SPECIAL:{
                     U16 index = reader.readU16();
                     ConstantMethodRef* methodRef = context->constantMethod(index);
-                    MethodInfo* methodToInvoke = methodRef->getMethodInfo();
-                    if(methodToInvoke->isStatic()){
+                    MethodInfo* methodInfo = methodRef->getMethodInfo();
+                    if(methodInfo->isStatic()){
                         throw std::exception();
                     }
-                    U32 argSlotCount = methodToInvoke->methodDescriptor->argSlotCount;
-                    argSlotCount += 1;
-                    auto* newFrame = new StackFrame(methodToInvoke->code);
-                    for(U32 i = argSlotCount-1;i >= 0;i--){
-                        newFrame->localTable.at(i) = opStack.pop();
+                    if(methodInfo->isNative()){
+                        auto key = make_tuple();
+                        NativeMethod* nativeMethod = lookupNativeMethod(methodInfo);
+                        if(nativeMethod == nullptr){
+                            throw std::exception();
+                        }
+                        U32 argSlotCount = methodInfo->methodDescriptor->argSlotCount;
+                        U32 retSlotCount = methodInfo->methodDescriptor->retSlotCount;
+                        argSlotCount += 1;
+                        vector<Slot> args(std::max(argSlotCount, retSlotCount));
+                        for(I32 i = argSlotCount-1;i >= 0;i--){
+                            args[i] = opStack.pop();
+                        }
+                        (*nativeMethod)(&args);
+                        for(U32 i = 0;i < retSlotCount;i++){
+                            opStack.push(args[i]);
+                        }
+                    }else{
+                        U32 argSlotCount = methodInfo->methodDescriptor->argSlotCount + 1;
+                        invokeMethod(thread, methodInfo->code, argSlotCount);
                     }
-                    thread->push(newFrame);
                     break;
                 }
                 case OpCode::INVOKE_VIRTUAL:{
                     U16 index = reader.readU16();
                     ConstantMethodRef* methodRef = context->constantMethod(index);
-                    MethodInfo* methodToInvoke = methodRef->getMethodInfo();
-                    if(methodToInvoke->isStatic()){
+                    MethodInfo* virtualMethod = methodRef->getMethodInfo();
+                    if(virtualMethod->isStatic()){
                         throw std::exception();
                     }
-                    U32 argSlotCount = methodToInvoke->methodDescriptor->argSlotCount;
+                    U32 argSlotCount = virtualMethod->methodDescriptor->argSlotCount;
+                    Reference objectReference = opStack.peek(argSlotCount).referenceValue;
                     argSlotCount += 1;
-                    auto* newFrame = new StackFrame(methodToInvoke->code);
-                    for(U32 i = argSlotCount-1;i >= 0;i--){
-                        newFrame->localTable.at(i) = opStack.pop();
-                    }
-                    Reference reference = newFrame->localTable.at(0).referenceValue;
-                    auto* targetObject = _heap->deref<ObjectHeader>(reference);
+                    auto* targetObject = _heap->deref<ObjectHeader>(objectReference);
                     Class* targetClass = targetObject->klass;
-                    MethodInfo* realMethod = targetClass->lookupMethod(
-                            methodToInvoke->name,
-                            methodToInvoke->descriptor);
-                    newFrame->code = CodeReader(realMethod->code->code, realMethod->code->codeLength);
-                    newFrame->context = realMethod->klass;
-                    thread->push(newFrame);
+                    MethodInfo* realMethod = targetClass->lookupMethod(virtualMethod);
+                    invokeMethod(thread, realMethod->code, argSlotCount);
                     break;
                 }
                 case OpCode::INVOKE_INTERFACE:{
                     U16 index = reader.readU16();
                     U16 unused = reader.readU16();
                     ConstantMethodRef* methodRef = context->constantMethod(index);
-                    MethodInfo* methodToInvoke = methodRef->getMethodInfo();
-                    if(methodToInvoke->isStatic()){
+                    MethodInfo* interfaceMethod = methodRef->getMethodInfo();
+                    if(interfaceMethod->isStatic()){
                         throw std::exception();
                     }
-                    U32 argSlotCount = methodToInvoke->methodDescriptor->argSlotCount;
+                    U32 argSlotCount = interfaceMethod->methodDescriptor->argSlotCount;
+                    Reference objectReference = opStack.peek(argSlotCount).referenceValue;
                     argSlotCount += 1;
-                    auto* newFrame = new StackFrame(methodToInvoke->code);
-                    for(U32 i = argSlotCount-1;i >= 0;i--){
-                        newFrame->localTable.at(i) = opStack.pop();
-                    }
-                    Reference reference = newFrame->localTable.at(0).referenceValue;
-                    auto* targetObject = _heap->deref<ObjectHeader>(reference);
+                    auto* targetObject = _heap->deref<ObjectHeader>(objectReference);
                     Class* targetClass = targetObject->klass;
-                    MethodInfo* realMethod = targetClass->lookupMethod(
-                            methodToInvoke->name,
-                            methodToInvoke->descriptor);
-                    newFrame->code = CodeReader(realMethod->code->code, realMethod->code->codeLength);
-                    newFrame->context = realMethod->klass;
-                    thread->push(newFrame);
+                    MethodInfo* realMethod = targetClass->lookupMethod(interfaceMethod);
+                    invokeMethod(thread, realMethod->code, argSlotCount);
+                    break;
+                }
+                case OpCode::INVOKE_DYNAMIC:{
+                    throw std::exception();
+                    break;
+                }
+                case OpCode::I_RETURN:
+                case OpCode::F_RETURN:
+                case OpCode::A_RETURN:{
+                    auto* currentFrame = thread->pop();
+                    thread->top()->operandStack.push(currentFrame->operandStack.pop());
+                    break;
+                }
+                case OpCode::L_RETURN:
+                case OpCode::D_RETURN:{
+                    auto* currentFrame = thread->pop();
+                    thread->top()->operandStack.push2(currentFrame->operandStack.pop2());
+                    break;
+                }
+                case OpCode::V_RETURN:{
+                    thread->pop();
+                    break;
+                }
+                case OpCode::A_THROW:{
+                    Reference reference = opStack.top().referenceValue;
+                    throwException(thread, reference);
+                    break;
+                }
+                case OpCode::NOP:{
                     break;
                 }
             }
-            break;
         }
+    }
+
+    void invokeMethod(Thread* thread, AttributeCode* code, U32 argSlotCount){
+        auto* oldFrame = thread->top();;
+        auto* newFrame = new StackFrame(code);
+        for(I32 i = argSlotCount-1;i >= 0;i--){
+            newFrame->localTable.at(i) = oldFrame->operandStack.pop();
+        }
+        thread->push(newFrame);
+    }
+
+    Reference newString(string u8String){
+        Class* stringClass = _classLoader->lookupClassByDescriptor("Ljava/lang/String;");
+        Reference jStringRef = newObject(stringClass);
+        wstring u16String = u8ToU16(u8String);
+        auto* jString = _heap->deref<ObjectHeader>(jStringRef);
+        Reference jChars = newPrimitiveArray(Primitive::CHAR, u16String.size());
+        ArrayHeader* jCharArray = derefArray(jChars);
+        for(U32 i = 0;i < jCharArray->length;i++){
+            jCharArray->charElement(i) = u16String[i];
+        }
+        auto* field = jString->klass->lookupField("value", "[C");
+        jString->referenceAt(field->shift) = jChars;
+        return jStringRef;
+    }
+
+    Reference internString(string u8String){
+        if(_stringPool.count(u8String) == 0){
+            _stringPool[u8String] = newString(u8String);
+        }
+        return _stringPool[u8String];
+    }
+
+    void throwException(Thread* thread, Reference exceptionReference){
+        auto* exception = _heap->deref<ObjectHeader>(exceptionReference);
+        while(!thread->empty()){
+            StackFrame* top = thread->top();
+            auto& exceptionTable = top->code->exceptionTable;
+            for(auto* exceptionEntry: exceptionTable){
+                if(exceptionEntry->startPc <= top->pc && exceptionEntry->endPc >= top->pc){
+                    ConstantClass* handleType = top->context->constantClass(exceptionEntry->catchType);
+                    if(exception->isInstance(handleType->getClass())){
+                        top->pc = exceptionEntry->handlerPc;
+                        return;
+                    }
+                }
+            }
+        }
+        throw std::exception();
+    }
+
+    static wstring u8ToU16(const string& u8String){
+        return std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t>().from_bytes(u8String);
+    }
+
+    ObjectHeader* derefObject(Reference reference){
+        return _heap->deref<ObjectHeader>(reference);
+    }
+
+    ArrayHeader* derefArray(Reference reference){
+        return _heap->deref<ArrayHeader>(reference);
+    }
+
+    Reference refClass(Class* klass){
+        return _heap->ref(klass);
     }
 
     Reference newObject(Class* klass){
         U32 size = sizeof(ObjectHeader) + klass->objectSize;
         Reference reference = _heap->alloc(size);
-        ((ObjectHeader*)_heap)->klass = klass;
+        derefObject(reference)->klass = klass;
+        _heap->deref<ObjectHeader>(reference)->hashCode = reference;
         return reference;
     }
 
@@ -1109,7 +1392,7 @@ public:
             Reference reference = newArray(arrayDescriptor, arrayLength);
             auto* arrayHeader = _heap->deref<ArrayHeader>(reference);
             for(U32 i = 0;i < arrayLength;i++){
-                arrayHeader->slotAt(i).referenceValue = newMultiDimensionArray(descriptor, dimensions);
+                arrayHeader->referenceElement(i) = newMultiDimensionArray(descriptor, dimensions);
             }
             return reference;
         }

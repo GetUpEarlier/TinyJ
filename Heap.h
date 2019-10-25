@@ -30,11 +30,6 @@ public:
         _allocated = 8;
     }
 
-//    Reference allocObject(U32 size);
-//    Reference newObject(Class* klass);
-//    Reference newArray(Class* klass, U32 length);
-//    Object* derefObject(Reference reference);
-//    Reference refObject(Object* object);
     Reference alloc(U32 size){
         Reference reference = _allocated;
         _allocated += size;
